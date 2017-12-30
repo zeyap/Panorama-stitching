@@ -23,7 +23,7 @@ bool Fit(vector<DMatch> matches, vector<KeyPoint> dstKps, vector<KeyPoint> srcKp
 void DetectAndDescribe(vector<Mat> & imgs_bgr, vector<Mat> & imgs, vector<Mat> & descriptors, vector<vector<KeyPoint>> & kps);
 void MatchNextTo(int i, BFMatcher matcher, vector<DMatch> & matches, vector<Mat> imgs, vector<Mat> descriptors, vector<vector<KeyPoint>> kps);
 void WarpNextToFit(int i, vector<DMatch> & matches, vector<Mat> & imgs_bgr, vector<vector<KeyPoint>> kps, Mat & lasthomo, vector<Mat> & warps);
-void Stitch(vector<Mat> warps, Mat & dst);
+void Stitch(vector<Mat> warps);
 
 int main(int argc, char ** argv)
 {
@@ -44,11 +44,8 @@ int main(int argc, char ** argv)
 		MatchNextTo(i, matcher, matches, imgs, descriptors, kps);
 		WarpNextToFit(i, matches,imgs_bgr, kps,lasthomo, warps);
 	}
-
-	Mat stitch;
-	Stitch(warps,stitch);
-	SaveImage("stitch", stitch);
-	waitKey();
+	
+	Stitch(warps);
 
 	return 0;
 }
@@ -214,7 +211,8 @@ bool Fit(vector<DMatch> matches, vector<KeyPoint> dstKps, vector<KeyPoint> srcKp
 	return res;
 }
 
-void Stitch(vector<Mat> warps,Mat & dst) {
+void Stitch(vector<Mat> warps) {
+	Mat dst;
 	int sz = warps.size();
 	dst = warps[sz - 1].clone();
 
@@ -230,4 +228,6 @@ void Stitch(vector<Mat> warps,Mat & dst) {
 			}
 		}
 	}
+	SaveImage("stitch", dst);
+	waitKey();
 }
