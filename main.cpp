@@ -15,22 +15,50 @@ using namespace cv;
 #define IMAGE_NUM 4
 
 void Log(vector<DMatch> matches, string fname);
+void SaveImage(string name, Mat img);
 void FilterMatchesByDistance(vector<DMatch> & matches, double distThres);
 void Fit_Ransac(vector<DMatch> matches, vector<KeyPoint> queryKps, vector<KeyPoint> trainKps, int seedSz, int iterNum, Mat & homography);
 bool Fit(vector<DMatch> matches, vector<KeyPoint> dstKps, vector<KeyPoint> srcKps, vector<int>shuffleArray, int seedSz, Mat & homography);
+
+void DetectAndDescribe(vector<Mat> & imgs_bgr, vector<Mat> & imgs, vector<Mat> & descriptors, vector<vector<KeyPoint>> & kps);
+void MatchNextTo(int i, BFMatcher matcher, vector<DMatch> & matches, vector<Mat> imgs, vector<Mat> descriptors, vector<vector<KeyPoint>> kps);
+void WarpNextToFit(int i, vector<DMatch> & matches, vector<Mat> & imgs_bgr, vector<vector<KeyPoint>> kps, Mat & lasthomo, vector<Mat> & warps);
 void Stitch(vector<Mat> warps, Mat & dst);
 
 int main(int argc, char ** argv)
 {
-	Ptr<Feature2D> f2d = xfeatures2d::SIFT::create(0, 4, 0.1,10, 1.6);
-
 	vector<Mat> descriptors;
-	vector<Mat> imgs;
+	vector<Mat> imgs; 
+	vector<Mat> imgs_bgr;
 	vector<vector<KeyPoint>> kps;
 
+	DetectAndDescribe(imgs_bgr, imgs, descriptors, kps);
+
+	vector<Mat> warps;
+
+	BFMatcher matcher;
+
+	Mat lasthomo;
+	for (int i = 0; i < IMAGE_NUM - 1; i++) {
+		vector<DMatch> matches;
+		MatchNextTo(i, matcher, matches, imgs, descriptors, kps);
+		WarpNextToFit(i, matches,imgs_bgr, kps,lasthomo, warps);
+	}
+
+	Mat stitch;
+	Stitch(warps,stitch);
+	SaveImage("stitch", stitch);
+	waitKey();
+
+	return 0;
+}
+
+void DetectAndDescribe(vector<Mat> & imgs_bgr, vector<Mat> & imgs, vector<Mat> & descriptors, vector<vector<KeyPoint>> & kps) {
+	Ptr<Feature2D> f2d = xfeatures2d::SIFT::create(0, 4, 0.1, 10, 1.6);
 	for (int i = 0; i < IMAGE_NUM; i++) {
 		string fname = "yosemite" + to_string(i + 1) + ".jpg";
 		Mat img_bgr = imread(fname);
+		imgs_bgr.push_back(img_bgr);
 		Mat newimg;
 		cvtColor(img_bgr, newimg, CV_BGR2GRAY);
 		vector<KeyPoint> newkps;
@@ -42,42 +70,38 @@ int main(int argc, char ** argv)
 		imgs.push_back(newimg);
 		kps.push_back(newkps);
 	}
+}
 
-	BFMatcher matcher;
-	vector<Mat> homo;
-	vector<Mat> warps;
-	warps.push_back(imgs[0]);
-	for (int i = 0; i < IMAGE_NUM - 1; i++) {
-		vector<DMatch> matches;
-		Mat out;
-		matcher.match(descriptors[i + 1], descriptors[i], matches);
-		FilterMatchesByDistance(matches,100);
-		Log(matches, "match" + to_string(i) + "_" + to_string(i + 1) + ".txt");
-		drawMatches(imgs[i+1], kps[i+1], imgs[i], kps[i], matches, out);
-		imshow("match", out);
-		//waitKey();
-		Mat newhomo;
-		//i+1->i
-		Fit_Ransac(matches, kps[i+1], kps[i],3,10, newhomo);
-		
-		Mat warpRes;
-		if (i > 0) {
-			newhomo *= homo[i - 1];
-		}
-		homo.push_back(newhomo);
-		
-		warpPerspective(imgs[i+1],warpRes,newhomo,Size(imgs[i].size().width*(i+2), imgs[i + 1].size().height));
-		warps.push_back(warpRes);
-		imshow("warp"+to_string(i+1),warpRes);
-		//waitKey();
+void MatchNextTo(int i, BFMatcher matcher, vector<DMatch> & matches, vector<Mat> imgs, vector<Mat> descriptors, vector<vector<KeyPoint>> kps) {
+	Mat out;
+	matcher.match(descriptors[i + 1], descriptors[i], matches);
+	FilterMatchesByDistance(matches, 100);
+	string match_fname = "match" + to_string(i) + "_" + to_string(i + 1);
+	Log(matches, match_fname);
+	drawMatches(imgs[i + 1], kps[i + 1], imgs[i], kps[i], matches, out);
+	SaveImage(match_fname, out);
+}
+
+void WarpNextToFit(int i, vector<DMatch> & matches, vector<Mat> & imgs_bgr, vector<vector<KeyPoint>> kps, Mat & lasthomo, vector<Mat> & warps) {
+	Mat newhomo;
+	//i+1->i
+	Fit_Ransac(matches, kps[i + 1], kps[i], 3, 10, newhomo);
+	Mat warpRes;
+	if (i > 0) {
+		newhomo *= lasthomo;
 	}
+	lasthomo = newhomo.clone();
 
-	Mat stitch;
-	Stitch(warps,stitch);
-	imshow("stitch", stitch);
-	waitKey();
+	if (i == 0) {
+		warps.push_back(imgs_bgr[i]);
+	}
+	warpPerspective(imgs_bgr[i + 1], warpRes, newhomo, Size(imgs_bgr[i].size().width*(i + 2), imgs_bgr[i + 1].size().height));
+	warps.push_back(warpRes);
+	SaveImage("warp" + to_string(i + 1), warpRes);
+}
 
-	return 0;
+void SaveImage(string name,Mat img) {
+	imwrite("output/"+name+".png",img);
 }
 
 bool FileExist(string str) {
@@ -93,6 +117,7 @@ bool FileExist(string str) {
 }
 
 void Log(vector<DMatch> matches, string fname) {
+	fname = "output/" + fname+".txt";
 	if (FileExist(fname)) {
 		return;
 	}
@@ -199,8 +224,8 @@ void Stitch(vector<Mat> warps,Mat & dst) {
 	for (int i = sz-2; i >=0; i--) {
 		for (int y = 0; y < h; y++) {
 			for (int x = 0; x < warps[i].size().width; x++) {
-				if (dst.at<uchar>(y, x) == 0 && warps[i].at<uchar>(y, x) != 0) {
-					dst.at<uchar>(y, x) = warps[i].at<uchar>(y, x);
+				if (dst.at<Vec3b>(y, x) == Vec3b(0,0,0) && warps[i].at<Vec3b>(y, x) != Vec3b(0, 0, 0)) {
+					dst.at<Vec3b>(y, x) = warps[i].at<Vec3b>(y, x);
 				}
 			}
 		}
