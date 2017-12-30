@@ -2,6 +2,8 @@
 !*.cpp
 !*.h
 !*.hpp
+!*.jpg
+!output/
 
 # Windows image file caches
 Thumbs.db
