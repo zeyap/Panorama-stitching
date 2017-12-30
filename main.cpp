@@ -59,12 +59,12 @@ int main(int argc, char ** argv)
 		Mat newhomo;
 		//i+1->i
 		Fit_Ransac(matches, kps[i+1], kps[i],3,10, newhomo);
-		homo.push_back(newhomo);
-		Mat warpRes;
 		
-		for (int j = 0; j < i; j++) {
-			newhomo *= homo[j];
+		Mat warpRes;
+		if (i > 0) {
+			newhomo *= homo[i - 1];
 		}
+		homo.push_back(newhomo);
 		
 		warpPerspective(imgs[i+1],warpRes,newhomo,Size(imgs[i].size().width*(i+2), imgs[i + 1].size().height));
 		warps.push_back(warpRes);
