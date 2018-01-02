@@ -12,9 +12,12 @@
 using namespace std;
 using namespace cv;
 
-#define IMAGE_NUM 4
+int image_num;
+string prefix;
+string image_type;
 
 void Log(vector<DMatch> matches, string fname);
+bool FileExist(string str);
 void SaveImage(string name, Mat img);
 void FilterMatchesByDistance(vector<DMatch> & matches, double distThres);
 void Fit_Ransac(vector<DMatch> matches, vector<KeyPoint> queryKps, vector<KeyPoint> trainKps, int seedSz, int iterNum, Mat & homography);
@@ -27,19 +30,32 @@ void Stitch(vector<Mat> warps);
 
 int main(int argc, char ** argv)
 {
+	image_num = 0;
 	vector<Mat> descriptors;
 	vector<Mat> imgs; 
 	vector<Mat> imgs_bgr;
 	vector<vector<KeyPoint>> kps;
 
+	cout << "Rename your input files in the directory by 'some_identical_name'+consecutive numbers, eg. 'yosemite1', 'yosemite2', ..." << endl;
+	cout << "Input your file name prefix here, eg. yosemite:" << endl;
+	cin >> prefix;
+	cout << "Input the maximum, eg. 4" << endl;
+	cin >> image_num;
+	cout << "Input the file type, eg. jpg" << endl;
+	cin >> image_type;
+	image_type = '.' + image_type;
+
+	if (!FileExist(prefix + to_string(1) +image_type)) {
+		cout <<"the input file does not exist" <<endl;
+		return 0;
+	}
+
 	DetectAndDescribe(imgs_bgr, imgs, descriptors, kps);
 
-	vector<Mat> warps;
-
 	BFMatcher matcher;
-
+	vector<Mat> warps;
 	Mat lasthomo;
-	for (int i = 0; i < IMAGE_NUM - 1; i++) {
+	for (int i = 0; i < image_num - 1; i++) {
 		vector<DMatch> matches;
 		MatchNextTo(i, matcher, matches, imgs, descriptors, kps);
 		WarpNextToFit(i, matches,imgs_bgr, kps,lasthomo, warps);
@@ -51,21 +67,26 @@ int main(int argc, char ** argv)
 }
 
 void DetectAndDescribe(vector<Mat> & imgs_bgr, vector<Mat> & imgs, vector<Mat> & descriptors, vector<vector<KeyPoint>> & kps) {
+
 	Ptr<Feature2D> f2d = xfeatures2d::SIFT::create(0, 4, 0.1, 10, 1.6);
-	for (int i = 0; i < IMAGE_NUM; i++) {
-		string fname = "yosemite" + to_string(i + 1) + ".jpg";
+	for (int i = 0; i < image_num; i++) {
+		//read images
+		string fname = prefix + to_string(i + 1) + image_type;
 		Mat img_bgr = imread(fname);
 		imgs_bgr.push_back(img_bgr);
 		Mat newimg;
 		cvtColor(img_bgr, newimg, CV_BGR2GRAY);
+		imgs.push_back(newimg);
+
+		//calculate keypoints
 		vector<KeyPoint> newkps;
 		f2d->detect(newimg, newkps);
+		kps.push_back(newkps);
+
+		//calculate descriptors
 		Mat newdescriptor;
 		f2d->compute(newimg, newkps, newdescriptor);
-		//cout << newkps[0].pt << endl;
 		descriptors.push_back(newdescriptor);
-		imgs.push_back(newimg);
-		kps.push_back(newkps);
 	}
 }
 
@@ -73,26 +94,30 @@ void MatchNextTo(int i, BFMatcher matcher, vector<DMatch> & matches, vector<Mat>
 	Mat out;
 	matcher.match(descriptors[i + 1], descriptors[i], matches);
 	FilterMatchesByDistance(matches, 100);
+
 	string match_fname = "match" + to_string(i) + "_" + to_string(i + 1);
 	Log(matches, match_fname);
 	drawMatches(imgs[i + 1], kps[i + 1], imgs[i], kps[i], matches, out);
 	SaveImage(match_fname, out);
 }
 
-void WarpNextToFit(int i, vector<DMatch> & matches, vector<Mat> & imgs_bgr, vector<vector<KeyPoint>> kps, Mat & lasthomo, vector<Mat> & warps) {
+void WarpNextToFit(int i, vector<DMatch> & matches, vector<Mat> & imgs_bgr, 
+	vector<vector<KeyPoint>> kps, Mat & lasthomo, vector<Mat> & warps) {
+	//calculate homography
 	Mat newhomo;
-	//i+1->i
-	Fit_Ransac(matches, kps[i + 1], kps[i], 3, 10, newhomo);
+	Fit_Ransac(matches, kps[i + 1], kps[i], 3, 10, newhomo);//i+1->i
 	Mat warpRes;
 	if (i > 0) {
 		newhomo *= lasthomo;
 	}
 	lasthomo = newhomo.clone();
 
+	//warp images
 	if (i == 0) {
 		warps.push_back(imgs_bgr[i]);
 	}
-	warpPerspective(imgs_bgr[i + 1], warpRes, newhomo, Size(imgs_bgr[i].size().width*(i + 2), imgs_bgr[i + 1].size().height));
+	warpPerspective(imgs_bgr[i + 1], warpRes, newhomo, 
+		Size(imgs_bgr[i].size().width*(i + 2), imgs_bgr[i + 1].size().height));
 	warps.push_back(warpRes);
 	SaveImage("warp" + to_string(i + 1), warpRes);
 }
@@ -105,7 +130,7 @@ bool FileExist(string str) {
 	string newStr = str;
 	std::ifstream fin(newStr);
 	if (fin) {
-		cout << "File " + str + " already exists" << endl;
+		cout << "File '" + str + "' found in directory" << endl;
 		return true;
 	}
 	else {
@@ -174,6 +199,10 @@ bool Fit(vector<DMatch> matches, vector<KeyPoint> dstKps, vector<KeyPoint> srcKp
 	int inlierNum = 0;
 	double inlierthres = 20;
 	double minInlierRate = 0.8;
+
+	//calculate ratio of inliers
+	//return true if inlier ratio > minInlierRate
+	//...
 	
 	for (int i = 0; i < matches.size(); i++) {
 		int srcIdx=matches[i].queryIdx;
@@ -222,7 +251,8 @@ void Stitch(vector<Mat> warps) {
 	for (int i = sz-2; i >=0; i--) {
 		for (int y = 0; y < h; y++) {
 			for (int x = 0; x < warps[i].size().width; x++) {
-				if (dst.at<Vec3b>(y, x) == Vec3b(0,0,0) && warps[i].at<Vec3b>(y, x) != Vec3b(0, 0, 0)) {
+				if (dst.at<Vec3b>(y, x) == Vec3b(0,0,0) 
+					&& warps[i].at<Vec3b>(y, x) != Vec3b(0, 0, 0)) {
 					dst.at<Vec3b>(y, x) = warps[i].at<Vec3b>(y, x);
 				}
 			}
